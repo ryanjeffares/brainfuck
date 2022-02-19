@@ -41,20 +41,32 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     match args.len() {
-        1 => repl(),
-        2 | 3 => {
+        1 => repl(false),
+        2|3|4 => {
+            if args.len() == 2 && args[1] == "-c" {
+                repl(true);
+                return;
+            }
+
             if !args[1].ends_with(".bf") {
                 eprintln!("Error: file {} was not a `.bf` file.", args[1]);
                 return;
             }
 
-            if args.len() == 3 && (args[2] != "-v" && args[2] != "--verbose") {
+            if args.len() >= 3 && (args[2] != "-v" && args[2] != "-c") {
                 usage();
                 return;
             }
 
-            let verbose = args.len() == 3 && (args[2] == "-v" || args[2] == "--verbose");
-            let result = run_file(&args[1], verbose);
+            if args.len() == 4 && (args[3] != "-v" && args[3] != "-c") {
+                usage();
+                return;
+            }
+
+            let verbose = (args.len() == 3 && args[2] == "-v") || (args.len() == 4 && (args[3] == "-v" || args[2] == "-v"));
+            let display_chars = (args.len() == 3 && args[2] == "-c") || (args.len() == 4 && (args[3] == "-c" || args[2] == "-c"));
+
+            let result = run_file(&args[1], verbose, display_chars);
             if result.is_err() {
                 eprintln!("Error reading file: {}", result.err().unwrap());
             }
@@ -66,11 +78,11 @@ fn main() {
 /// Run the REPL.
 /// Creates an instance of the Interpreter struct, and continually prompts the user to input a
 /// line which is compiled and ran. 'exit' can be entered to exit the REPL.
-fn repl() {
+fn repl(display_chars: bool) {
     println!("Welcome to brainfuck!");
     let mut interpreter = Interpreter::<DATA_SIZE>::new(); 
     loop {
-        // println!();
+        println!();
         print!("> ");
         stdout().flush().unwrap();
 
@@ -79,7 +91,7 @@ fn repl() {
             Ok(_) => {
                 match buffer.trim() {
                     "exit" => process::exit(0),
-                    _ => interpreter.compile(buffer, false),
+                    _ => interpreter.compile(buffer, false, display_chars),
                 }
             }
             Err(error) => println!("Error: {error}"),
@@ -90,10 +102,10 @@ fn repl() {
 /// Read the given file, create and instance of the Interpreter struct and run the file.
 /// Path given to this function has already been checked to be a `.bf` file, and any errors
 /// encountered while reading the file are reported.
-fn run_file(file_path: &String, verbose: bool) -> Result<(), Box<dyn Error>> {
+fn run_file(file_path: &String, verbose: bool, display_chars: bool) -> Result<(), Box<dyn Error>> {
     let text = std::fs::read_to_string(file_path)?.parse()?;
     let mut interpreter = Interpreter::<DATA_SIZE>::new();
-    interpreter.compile(text, verbose);
+    interpreter.compile(text, verbose, display_chars);
     Ok(())
 }
 
@@ -102,7 +114,7 @@ fn usage() {
         \n\
         Usage:\n\
         \n\
-        brainfuck [file [-v/--verbose]]\n\
+        brainfuck [file [-v] [-c]]\n\
         "
         );
 }
@@ -153,7 +165,7 @@ impl<const N: usize> Interpreter<N> {
     }
 
     /// Compile and run brainfuck code.
-    fn compile(&mut self, code: String, verbose: bool) {
+    fn compile(&mut self, code: String, verbose: bool, display_chars: bool) {
         let start = std::time::Instant::now();
 
         // Clearing the Op list is only necessary in the REPL,
@@ -182,7 +194,7 @@ impl<const N: usize> Interpreter<N> {
             if verbose {
                 println!("Compilation succeeded in {:?}", start.elapsed());
             }
-            let res = self.run();
+            let res = self.run(display_chars);
             if !res {
                 eprintln!("Error occured during execution.");
             }
@@ -227,7 +239,7 @@ impl<const N: usize> Interpreter<N> {
     }
 
     /// Reset the instruction pointer to 0 and run the compiled list of instructions.
-    fn run(&mut self) -> bool {
+    fn run(&mut self, display_chars: bool) -> bool {
         self.inst_pointer = 0;
 
         // Jump instructions will move the instruction pointer around the program
@@ -252,7 +264,7 @@ impl<const N: usize> Interpreter<N> {
                     self.inst_pointer += 1;
                 }
                 Op::OutputDp => {
-                    self.output_dp();
+                    self.output_dp(display_chars);
                     self.inst_pointer += 1;
                 }
                 Op::InputDp => {
@@ -317,8 +329,12 @@ impl<const N: usize> Interpreter<N> {
     }
 
     #[inline]
-    fn output_dp(&self) {
-        println!("{}", self.data[self.data_pointer]);
+    fn output_dp(&self, display_chars: bool) {
+        if display_chars {
+            print!("{}", self.data[self.data_pointer] as u8 as char);
+        } else {
+            print!("{}", self.data[self.data_pointer]);
+        }
     }
 
     fn jump_forward(&mut self) -> bool {

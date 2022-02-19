@@ -12,7 +12,10 @@ Build using Cargo.
 Can be run as a REPL or with a `.bf` file.
 
 ```bash
-$ brainfuck [file [-v/--verbose]]
+$ brainfuck [file [-v] [-c]]
 ```
+
+* `-c` enables displaying output as characters rather than byte values.
+* `-v` enables verbose mode for the compiler (will output compilation time).
 
 While in the REPL, entering "exit" will quit the REPL, and any characters that are not `<`, `>`, `+`, `-`, `[`, or `]` are ignored.
