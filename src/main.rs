@@ -39,18 +39,26 @@ const JUMP_BACK: char           = ']';
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+
     match args.len() {
         1 => repl(),
-        2 => {
+        2 | 3 => {
             if !args[1].ends_with(".bf") {
                 eprintln!("Error: file {} was not a `.bf` file.", args[1]);
-            } else {
-                let result = run_file(&args[1]);
-                if result.is_err() {
-                    eprintln!("Error reading file: {}", result.err().unwrap());
-                }
+                return;
             }
-        },
+
+            if args.len() == 3 && (args[2] != "-v" && args[2] != "--verbose") {
+                usage();
+                return;
+            }
+
+            let verbose = args.len() == 3 && (args[2] == "-v" || args[2] == "--verbose");
+            let result = run_file(&args[1], verbose);
+            if result.is_err() {
+                eprintln!("Error reading file: {}", result.err().unwrap());
+            }
+        }
         _ => usage(),
     }
 }
@@ -71,7 +79,7 @@ fn repl() {
             Ok(_) => {
                 match buffer.trim() {
                     "exit" => process::exit(0),
-                    _ => interpreter.compile(buffer),
+                    _ => interpreter.compile(buffer, false),
                 }
             }
             Err(error) => println!("Error: {error}"),
@@ -82,10 +90,10 @@ fn repl() {
 /// Read the given file, create and instance of the Interpreter struct and run the file.
 /// Path given to this function has already been checked to be a `.bf` file, and any errors
 /// encountered while reading the file are reported.
-fn run_file(file_path: &String) -> Result<(), Box<dyn Error>> {
+fn run_file(file_path: &String, verbose: bool) -> Result<(), Box<dyn Error>> {
     let text = std::fs::read_to_string(file_path)?.parse()?;
     let mut interpreter = Interpreter::<DATA_SIZE>::new();
-    interpreter.compile(text);
+    interpreter.compile(text, verbose);
     Ok(())
 }
 
@@ -94,7 +102,7 @@ fn usage() {
         \n\
         Usage:\n\
         \n\
-        brainfuck [file]\n\
+        brainfuck [file [-v/--verbose]]\n\
         "
         );
 }
@@ -145,7 +153,9 @@ impl<const N: usize> Interpreter<N> {
     }
 
     /// Compile and run brainfuck code.
-    fn compile(&mut self, code: String) {
+    fn compile(&mut self, code: String, verbose: bool) {
+        let start = std::time::Instant::now();
+
         // Clearing the Op list is only necessary in the REPL,
         // so that the same Interpreter instance can be reused
         self.op_list.clear();
@@ -169,6 +179,9 @@ impl<const N: usize> Interpreter<N> {
         if !self.validate_jumps() {
             eprintln!("Execution stopped due to mismatched jump instructions.");
         } else {
+            if verbose {
+                println!("Compilation succeeded in {:?}", start.elapsed());
+            }
             let res = self.run();
             if !res {
                 eprintln!("Error occured during execution.");
