@@ -1,17 +1,40 @@
 use std::error::Error;
-use std::{env, io::{stdin, stdout, Write}};
+use std::{env, io::{stdin, stdout, Write}, process};
 
-use console::Term;
+use console::Term;  // read_char()
 
+/// The size of the array of memory cells used by brainfuck.
+/// This can be changed and recompiled to suit different needs.
+/// Having this as a `const` allows us to use it as a const generic
+/// and stack allocate the `Interpreter` struct.
 const DATA_SIZE: usize          = 30000;
 
+/// The 6 characters that will be interpreted as brainfuck code.
+
+/// `>` increments the position of the data pointer by 1.
+/// Incrementing the data pointer above `DATA_SIZE` results in a panic.
 const INCREMENT_DP: char        = '>';
+/// `<` decrements the position of the data pointer by 1.
+/// Decrementing the data pointer below 0 results in a panic.
 const DECREMENT_DP: char        = '<';
+/// `+` increments the value of the byte at the data pointer by 1.
+/// Incrementing a byte over `i8::MAX`, or 127, results in the value wrapping around to `i8::MIN`,
+/// or -128.
 const INCREMENT_DP_VALUE: char  = '+';
+/// `-` decrements the value of the byte at the data pointer by 1.
+/// Decrementing a byte below 0 results in the value wrapping around to `i8::MAX`,
+/// or 127.
 const DECREMENT_DP_VALUE: char  = '-';
+/// `.` outputs the byte at the data pointer to the console.
 const OUTPUT_DP: char           = '.';
+/// `,` prompts the user to input a single character, which is written to the byte at the data
+/// pointer.
 const INPUT_DP: char            = ',';
+/// `[` moves the instruction pointer forwards to the command after the matching `]` if the byte at the data
+/// pointer is 0, or else the instruction pointer is incremented by 1.
 const JUMP_FORWARD: char        = '[';
+/// `]` moves the instruction pointer backwards to the command after the matching `[` if the byte
+/// at the data pointer is non-zero, or else the instruction pointer is incremented by 1.
 const JUMP_BACK: char           = ']';
 
 fn main() {
@@ -32,6 +55,9 @@ fn main() {
     }
 }
 
+/// Run the REPL.
+/// Creates an instance of the Interpreter struct, and continually prompts the user to input a
+/// line which is compiled and ran. 'exit' can be entered to exit the REPL.
 fn repl() {
     println!("Welcome to brainfuck!");
     let mut interpreter = Interpreter::<DATA_SIZE>::new(); 
@@ -43,13 +69,19 @@ fn repl() {
         let mut buffer = String::new();
         match stdin().read_line(&mut buffer) {
             Ok(_) => {
-                interpreter.compile(buffer)
+                match buffer.trim() {
+                    "exit" => process::exit(0),
+                    _ => interpreter.compile(buffer),
+                }
             }
             Err(error) => println!("Error: {error}"),
         }
     }
 }
 
+/// Read the given file, create and instance of the Interpreter struct and run the file.
+/// Path given to this function has already been checked to be a `.bf` file, and any errors
+/// encountered while reading the file are reported.
 fn run_file(file_path: &String) -> Result<(), Box<dyn Error>> {
     let text = std::fs::read_to_string(file_path)?.parse()?;
     let mut interpreter = Interpreter::<DATA_SIZE>::new();
@@ -67,6 +99,9 @@ fn usage() {
         );
 }
 
+/// An enum to represent the 6 operations within brainfuck.
+/// Any brainfuck program is compiled into a list of Ops, as a lightweight way to run through the
+/// operations of the program.
 #[derive(PartialEq)]
 enum Op {
     IncrementDp,
@@ -79,11 +114,17 @@ enum Op {
     JumpBackward,
 }
 
+/// A small struct to hold the start and end positions (within the list of operations) for matching
+/// `[` and `]` pairs.
 struct JumpPosition {
     start: usize,
     end: usize,
 }
 
+/// The Interpreter struct holds the array of memory cells, the data and instruction pointers, and
+/// Vecs of Ops and JumpInstructions that are filled during compilation.
+/// Using a const generic allows us to stack allocate the Interpreter while experimenting with
+/// different sizes of the data array.
 struct Interpreter<const N: usize> {
     data: [i8; N],
     data_pointer: usize,
@@ -103,7 +144,10 @@ impl<const N: usize> Interpreter<N> {
         }
     }
 
+    /// Compile and run brainfuck code.
     fn compile(&mut self, code: String) {
+        // Clearing the Op list is only necessary in the REPL,
+        // so that the same Interpreter instance can be reused
         self.op_list.clear();
 
         let chars = code.as_bytes();
@@ -117,6 +161,7 @@ impl<const N: usize> Interpreter<N> {
                 INPUT_DP =>             self.op_list.push(Op::InputDp),
                 JUMP_FORWARD =>         self.op_list.push(Op::JumpForward),
                 JUMP_BACK =>            self.op_list.push(Op::JumpBackward),
+                // any other character is ignored, so that brainfuck programs can contain whitespace and comments.                
                 _ => (),
             }
         }
@@ -131,20 +176,30 @@ impl<const N: usize> Interpreter<N> {
         }
     }
 
+    /// Validates jumps (`[` and `]`) by ensuring each jump forward instruction has exactly one
+    /// corresponding jump backward instruction, and vice versa.
     fn validate_jumps(&mut self) -> bool {
+        // In REPL mode, this needs to be cleared since the same Interpreter instance is reused.
         self.jump_positions.clear();
+
+        // Use a Vec like a stack to validate the jumps    
         let mut stack = Vec::<(Op, usize)>::new();
         
         for (index, op) in self.op_list.iter().enumerate() {
             match *op {
+                // Push a jump forward instruction and its index in the Op list to the top of the
+                // stack                
                 Op::JumpForward => stack.push((Op::JumpForward, index)),
+                // When we come across a jump back instruction, there must be its corresponding
+                // jump forward instruction at the top of the stack.  
                 Op::JumpBackward => {
-                    // there should be a JumpForward on the top of the stack
+                    // checking if the stack is empty first means the calls to `unwrap()` are safe
                     if stack.is_empty() || stack.last().unwrap().0 != Op::JumpForward {
                         eprintln!("Found mismatched jump instruction at Op {index}.");
                         return false;
                     }
 
+                    // now we know where the jump starts and ends
                     let start = stack.pop().unwrap();
                     self.jump_positions.push(JumpPosition {
                         start: start.1,
@@ -158,9 +213,13 @@ impl<const N: usize> Interpreter<N> {
         stack.is_empty()
     }
 
+    /// Reset the instruction pointer to 0 and run the compiled list of instructions.
     fn run(&mut self) -> bool {
         self.inst_pointer = 0;
 
+        // Jump instructions will move the instruction pointer around the program
+        // and any other operation will increment it by 1.
+        // So just run until the list of operations in exhausted.
         while self.inst_pointer < self.op_list.len() {
             match self.op_list[self.inst_pointer] {
                 Op::IncrementDp => {
@@ -250,6 +309,10 @@ impl<const N: usize> Interpreter<N> {
     }
 
     fn jump_forward(&mut self) -> bool {
+        // Called when we encounter a jump forward instruction.
+        // If the byte at the data pointer is 0, we need to jump just beyond the corresponding jump
+        // back instruction. We can find the JumpInstruction struct from the Vec that has the same
+        // `start` value as the current instruction pointer, so we move 1 beyond its `end`.
         if self.data[self.data_pointer] == 0 {
             let jp = self.jump_positions.iter().find(|&j| j.start == self.inst_pointer);
             if let Some(jump) = jp {
@@ -259,6 +322,7 @@ impl<const N: usize> Interpreter<N> {
                 return false;
             }
         } else {
+            // or else just increment by 1.
             self.inst_pointer += 1;
         }
 
@@ -266,6 +330,9 @@ impl<const N: usize> Interpreter<N> {
     }
 
     fn jump_backward(&mut self) -> bool {
+        // Called when we encounter a jump backward instruction.
+        // If the byte at the data pointer is non 0, we go back just beyond the corresponding jump
+        // forward instruction.
         if self.data[self.data_pointer] != 0 {
             let jp = self.jump_positions.iter().find(|&j| j.end == self.inst_pointer);
             if let Some(jump) = jp {

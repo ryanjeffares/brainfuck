@@ -14,3 +14,5 @@ Can be run as a REPL or with a `.bf` file.
 ```bash
 $ brainfuck [file]
 ```
+
+While in the REPL, entering "exit" will quit the REPL, and any characters that are not `<`, `>`, `+`, `-`, `[`, or `]` are ignored.
